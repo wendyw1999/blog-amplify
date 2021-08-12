@@ -3,8 +3,8 @@ import { API, graphqlOperation } from 'aws-amplify';
 import { withAuthenticator, AmplifySignOut } from '@aws-amplify/ui-react';
 import Amplify, { Auth } from 'aws-amplify';
 import awsconfig from './aws-exports';
-import { Button,Form,Container,Toast} from 'react-bootstrap';
-import { DataStore } from 'aws-amplify';
+import { Badge,Spinner,Button,Form,Container,Toast} from 'react-bootstrap';
+// import { DataStore } from 'aws-amplify';
 import { listPosts,listBlogs,listComments,getBlog,getPost,getComment} from './graphql/queries';
 import * as queries from './graphql/queries';
 import * as mutations from './graphql/mutations';
@@ -24,14 +24,14 @@ function parse(ISOString) {
   const hours = minutes/60;
   const days = minutes/24;
   if (minutes<1) {
-    return "Just Posted"
+    return <small>Just Posted <Badge bg="secondary">New</Badge></small>
   }
   else if (minutes < 60) {
-    return Math.round(minutes) + " minutes ago"
+    return <small>{Math.round(minutes) + " minutes ago"}</small>
   } else if (hours < 24) {
-    return Math.round(hours) + " hours ago"
+    return <small>{Math.round(hours) + " hours ago"}</small>
   } else {
-  return dateObject.toLocaleString() 
+  return <small>{dateObject.toLocaleString()}</small>
   }
 }
 async function createBlog(username,blogName) {
@@ -154,7 +154,6 @@ class App extends React.Component {
 
   
   async componentDidMount () {
-    this.setState({loading:true});
     try {
     const userinfo = await Auth.currentUserInfo();
     this.setState({username:userinfo.username,email:userinfo.attributes.email,phone:userinfo.attributes.phone_number});
@@ -165,11 +164,12 @@ class App extends React.Component {
 
       console.log(e);
     } 
-    this.setState({loading:false});
     }
 
     
     checkBlog = async(username) => {
+      this.setState({loading:true});
+
       try {
        const blog = await API.graphql(graphqlOperation(queries.getBlog, { id:username }));
        const { data: { listPosts: { items: itemsPage1, nextToken } } } = 
@@ -182,32 +182,62 @@ class App extends React.Component {
        } else {
          this.setState({blogName:blog.data.getBlog.name});
        }
-       this.setState({posts:itemsPage1});
+       const items = itemsPage1.filter(function(obj) {
+        return obj._deleted!=true
+       })
+       this.setState({posts:items});
       } catch(e) {
         console.log(e);
       }
+      this.setState({loading:false});
 
-      return false
    
     }
+
+
+
+     handleDelete = async(id) => {
+        //delete from file
+        //remove from posts
+
+        const postDetail = {
+          id: id,
+          _version:1
+        };
+        const newPosts = this.state.posts.filter(function( obj ) {
+          return obj.id !== id;
+        });
+          
+      this.setState({posts:newPosts});
+      this.setState({loadingNewPost:true});
+
+      try {
+
+       //const post = await API.graphql({query:queries.getPost,variables:postDetail})
+      const deletePost = await API.graphql({ query: mutations.deletePost, variables: {input: postDetail}});
+      } catch(e) {console.log(e)}
+      this.setState({loadingNewPost:false});
+
+
+     }
 
 
   render () {
 
     let e = "Alert!";
     if (this.state.loading||this.state.loadingNewPost) {
-      return (<p>Loading</p>)
-    }
+      return (<Spinner animation="border" />)
+    } 
   return (
     <Container>
       <h1>{this.state.blogName}</h1>
       
         {this.state.posts.length!=0?this.state.posts.map((item,index)=> {
-          
-          return (<Toast key={index}>
+          console.log(item);
+          return (<Toast key={item.id} onClose={()=>this.handleDelete(item.id)}>
             <Toast.Header key={index}>
               <strong className="me-auto">{item.blogID}</strong>
-              <small>{parse(item.updatedAt)}</small>
+            {parse(item.updatedAt)}
             </Toast.Header>
             <Toast.Body>{item.title}</Toast.Body>
           </Toast>)
