@@ -1,25 +1,238 @@
-import logo from './logo.svg';
-import './App.css';
+import React, { useState, useEffect } from 'react';
+import { API, graphqlOperation } from 'aws-amplify';
+import { withAuthenticator, AmplifySignOut } from '@aws-amplify/ui-react';
+import Amplify, { Auth } from 'aws-amplify';
+import awsconfig from './aws-exports';
+import { Button,Form,Container,Toast} from 'react-bootstrap';
+import { DataStore } from 'aws-amplify';
+import { listPosts,listBlogs,listComments,getBlog,getPost,getComment} from './graphql/queries';
+import * as queries from './graphql/queries';
+import * as mutations from './graphql/mutations';
+import * as subscriptions from './graphql/subscriptions';
+import 'bootstrap/dist/css/bootstrap.min.css'
 
-function App() {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
-  );
+Amplify.configure(awsconfig);
+
+
+function parse(ISOString) {
+
+  const todayObject = new Date();
+  const dateObject = new Date(Date.parse(ISOString));
+  const timeDiff = todayObject - dateObject;
+  
+  const minutes = timeDiff/60000;
+  const hours = minutes/60;
+  const days = minutes/24;
+  if (minutes<1) {
+    return "Just Posted"
+  }
+  else if (minutes < 60) {
+    return Math.round(minutes) + " minutes ago"
+  } else if (hours < 24) {
+    return Math.round(hours) + " hours ago"
+  } else {
+  return dateObject.toLocaleString() 
+  }
+}
+async function createBlog(username,blogName) {
+  const blogDetail = {
+    id: username,
+    name:blogName
+  };
+  try {
+  const newBlog = await API.graphql({
+    query: mutations.createBlog,
+    variables: {input: blogDetail},
+  });
+  return newBlog;
+  
+} catch(e) {console.log(e)}
 }
 
-export default App;
+
+
+
+
+class WritePost extends React.Component {
+  constructor(props) {
+    super(props);
+    this.onSubmit = this.onSubmit.bind(this);
+    this.onChange = this.onChange.bind(this);
+    this.state = this.state={
+      loading:false,
+      text:'',
+    }
+  }
+
+  onChange(event) {
+    this.setState({text: event.target.value});
+
+  };
+  async onSubmit (event) {
+    if (this.state.text === '') {
+      alert("Blank Post");
+      event.preventDefault();
+
+    } else {
+      this.props.functionSubmit(this.state.text);
+
+  //   const userinfo = await Auth.currentUserInfo();
+  //   const postDetail = {
+  //     blogID: userinfo.username,
+  //     title:this.state.text,
+      
+  //   }
+  //   console.log(postDetail);
+  //   try {
+  //   const newPost = await API.graphql({
+  //     query: mutations.createPost,
+  //     variables: {input: postDetail},
+  //   });
+  //   console.log(newPost);
+  // } catch(e) {console.log(e)}
+
+    }
+  }
+
+  
+  render() {
+    return (
+  <Form onSubmit={this.onSubmit}>
+       <Form.Group className="mb-3" controlId="exampleForm.ControlTextarea1">
+    <Form.Label>What do you have in mind?</Form.Label>
+    <Form.Control as="textarea" rows={3} onChange={this.onChange} placeholder="Start typing..."/>
+    <Button variant="primary" type="submit">
+    Submit
+  </Button>
+  </Form.Group>
+      </Form>
+    )
+  }
+}
+
+class App extends React.Component {
+  constructor(props) {
+    super(props);
+    this.handleSubmit = this.handleSubmit.bind(this);
+    this.state = this.state={
+      loadingNewPost:false,
+      loading:false,
+      username:'',
+      email:'',
+      phone:'',
+      posts:[],
+      blogName:'',
+    }
+  }
+
+
+
+  async handleSubmit (val) {
+    this.createPost(this.state.username,val);
+
+  }
+  async createPost(blogID,postTitle) {
+    this.setState({loadingNewPost:true})
+
+    const postDetail = {
+      blogID: blogID,
+      title:postTitle
+    }
+    try {
+    const newPost = await API.graphql({
+      query: mutations.createPost,
+      variables: {input: postDetail},
+    });
+    await this.state.posts.unshift(newPost.data.createPost);
+    this.setState({posts:this.state.posts});
+  } catch(e) {console.log(e)}
+  this.setState({loadingNewPost:false})
+
+
+  }
+  
+
+  
+  async componentDidMount () {
+    this.setState({loading:true});
+    try {
+    const userinfo = await Auth.currentUserInfo();
+    this.setState({username:userinfo.username,email:userinfo.attributes.email,phone:userinfo.attributes.phone_number});
+
+    this.checkBlog(userinfo.username);
+
+    } catch(e) {
+
+      console.log(e);
+    } 
+    this.setState({loading:false});
+    }
+
+    
+    checkBlog = async(username) => {
+      try {
+       const blog = await API.graphql(graphqlOperation(queries.getBlog, { id:username }));
+       const { data: { listPosts: { items: itemsPage1, nextToken } } } = 
+       await API.graphql({ query: listPosts, variables:
+         { limit: 20, blogID: {
+            eq: this.username // filter priority = 1
+        }}});
+       if (blog.data.getBlog==null) {
+   
+       } else {
+         this.setState({blogName:blog.data.getBlog.name});
+       }
+       this.setState({posts:itemsPage1});
+      } catch(e) {
+        console.log(e);
+      }
+
+      return false
+   
+    }
+
+
+  render () {
+
+    let e = "Alert!";
+    if (this.state.loading||this.state.loadingNewPost) {
+      return (<p>Loading</p>)
+    }
+  return (
+    <Container>
+      <h1>{this.state.blogName}</h1>
+      
+        {this.state.posts.length!=0?this.state.posts.map((item,index)=> {
+          
+          return (<Toast key={index}>
+            <Toast.Header key={index}>
+              <strong className="me-auto">{item.blogID}</strong>
+              <small>{parse(item.updatedAt)}</small>
+            </Toast.Header>
+            <Toast.Body>{item.title}</Toast.Body>
+          </Toast>)
+        }):<p>You don't have any posts</p>}
+      <WritePost value={e} functionSubmit={this.handleSubmit}></WritePost>
+      <AmplifySignOut style={styles.signoutButton}>
+      </AmplifySignOut>
+
+
+    </Container>
+  );
+}
+}
+
+const styles = {
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signoutButton: {
+    width:20,
+    height:100,
+  }
+};
+
+export default withAuthenticator(App);
